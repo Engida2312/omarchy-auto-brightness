@@ -171,6 +171,28 @@ check("reason explains the solar fallback", M.sourceReason(D, CAPS_NONE, "solar"
 check("reason reports an explicit choice", M.sourceReason(M.withDefaults({ source: "solar" }), CAPS_SENSOR, "solar").indexOf("set to") !== -1,
   M.sourceReason(M.withDefaults({ source: "solar" }), CAPS_SENSOR, "solar"))
 
+// ---- the message shown when AUTO is switched on ----
+// The whole point is that the user learns whether this machine has a sensor.
+var annSensor = M.announcement(D, CAPS_SENSOR, "als")
+check("sensor announcement names the sensor", annSensor.body.indexOf("ambient light sensor") !== -1, annSensor.body)
+check("sensor announcement is not a denial", annSensor.body.indexOf("No ambient") === -1, annSensor.body)
+
+var annSolar = M.announcement(D, CAPS_CAM, "solar")
+check("no-sensor announcement says so plainly", annSolar.body.indexOf("No ambient light sensor") !== -1, annSolar.body)
+check("no-sensor announcement says what it does instead", annSolar.body.indexOf("sun") !== -1, annSolar.body)
+
+var annCam = M.announcement(M.withDefaults({ allowWebcamFallback: true }), CAPS_CAM, "webcam")
+check("webcam announcement explains the fallback", annCam.body.indexOf("No ambient light sensor") !== -1, annCam.body)
+check("webcam announcement names the webcam", annCam.body.indexOf("webcam") !== -1, annCam.body)
+
+// An explicitly configured source is a choice, not a discovery: don't report
+// absent hardware the user never asked about.
+var annForced = M.announcement(M.withDefaults({ source: "solar" }), CAPS_SENSOR, "solar")
+check("explicit source is not reported as a fallback", annForced.body.indexOf("No ambient") === -1, annForced.body)
+
+eq("every announcement shares a headline", annSensor.headline, annSolar.headline)
+eq("no announcement before detection resolves", M.announcement(D, null, null), null)
+
 console.log("passed: " + passed + "   failed: " + failures.length)
 if (failures.length) {
   failures.forEach(function(f) { console.log("  FAIL " + f) })

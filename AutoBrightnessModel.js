@@ -207,6 +207,42 @@ function parseCapabilities(text) {
   return { als: als, webcam: webcam }
 }
 
+// What to tell the user the moment they switch AUTO on. Whether this machine
+// has a light sensor is the single most useful thing to say here: it decides
+// how the feature behaves, the user cannot see it anywhere else without
+// digging, and on a laptop without one the honest answer ("following the sun")
+// sets expectations that a silent fallback would quietly break.
+function announcement(settings, capabilities, effective) {
+  var configured = String((settings && settings.source) || "auto")
+  var headline = "Auto brightness on"
+  var detected = configured === "auto"
+
+  if (effective === "als") {
+    return { headline: headline, body: "Using your ambient light sensor." }
+  }
+
+  if (effective === "webcam") {
+    return {
+      headline: headline,
+      body: detected
+        ? "No ambient light sensor found - sensing light with your webcam."
+        : "Sensing light with your webcam."
+    }
+  }
+
+  if (effective === "solar") {
+    return {
+      headline: headline,
+      body: detected
+        ? "No ambient light sensor on this machine - following the sun instead."
+        : "Following the sun."
+    }
+  }
+
+  // Detection has not answered yet; the caller waits rather than sending this.
+  return null
+}
+
 // ------------------------------------------------------------ shaping
 
 // On battery, pull the target down by `batteryDim` points. Returns the target
@@ -373,6 +409,7 @@ if (typeof module !== "undefined") {
     detectSource: detectSource,
     sourceReason: sourceReason,
     parseCapabilities: parseCapabilities,
+    announcement: announcement,
     SOURCES: SOURCES
   }
 }

@@ -49,6 +49,11 @@ Item {
   property var capabilities: null
   property bool sampleAfterProbe: false
   property bool probeQueued: false
+  // Set when AUTO is switched on, cleared once we have actually told the user
+  // which light source they got. Detection may still be in flight at that
+  // moment, and announcing "following the sun" a beat before the sensor is
+  // found would be worse than staying quiet for one probe.
+  property bool announceOnResolve: false
 
   readonly property bool onBattery: {
     try { return UPower.onBattery === true } catch (e) { return false }
@@ -132,8 +137,39 @@ Item {
     persist()
     root.changed()
 
-    if (next) tick()
-    else rampTimer.stop()
+    if (next) {
+      root.announceOnResolve = true
+      tick()
+      maybeAnnounce()   // fires now if detection already has an answer
+    } else {
+      root.announceOnResolve = false
+      rampTimer.stop()
+    }
+  }
+
+  // Tell the user what the switch actually did, once we know. Reaches for the
+  // desktop notification rather than the OSD: the OSD is a transient bar built
+  // for a value changing, and this is a sentence worth reading.
+  function maybeAnnounce() {
+    if (!root.announceOnResolve) return
+    if (!root.autoEnabled) {
+      root.announceOnResolve = false
+      return
+    }
+    if (!root.effectiveSource) return   // probe still running; try again after
+
+    var message = Model.announcement(root.settings, root.capabilities, root.effectiveSource)
+    if (!message) return
+
+    root.announceOnResolve = false
+    if (announceProcess.running) return
+    announceProcess.command = [
+      "omarchy-notification-send",
+      "-g", "󰃠",   // brightness glyph, matching the shell's own icon style
+      message.headline,
+      message.body
+    ]
+    announceProcess.running = true
   }
 
   function toggle() {
@@ -342,6 +378,10 @@ Item {
     id: applyProcess
   }
 
+  Process {
+    id: announceProcess
+  }
+
   // Hardware probe. Re-run periodically as well as at startup: a USB ambient
   // light sensor or camera can appear after the shell is up, and the answer
   // decides which source `auto` picks.
@@ -357,6 +397,9 @@ Item {
         // Detection changed the answer (a sensor appeared, say): act on it now
         // instead of running the old source until the next interval.
         if (root.autoEnabled && root.effectiveSource !== before) root.tick()
+        // Detection just answered; this is the moment the announcement has
+        // something true to say.
+        root.maybeAnnounce()
       }
     }
     onExited: function(exitCode) {

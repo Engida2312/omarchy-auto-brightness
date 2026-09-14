@@ -60,8 +60,20 @@ $ omarchy-shell autobrightness status | jq -c '{effectiveSource, sourceReason}'
 {"effectiveSource":"solar","sourceReason":"no light sensor; estimating from the sun"}
 ```
 
-The switch's tooltip says the same thing, so the automatic choice is visible
-without leaving the panel.
+### It tells you which one it picked
+
+Switching AUTO on sends a notification naming the source it detected, so you
+find out whether this machine has a light sensor at the moment you first turn
+the feature on — not by reading docs or running a command:
+
+> **Auto brightness on**
+> Using your ambient light sensor.
+
+> **Auto brightness on**
+> No ambient light sensor on this machine - following the sun instead.
+
+The switch's tooltip says the same thing on hover, and `status` reports it for
+scripts.
 
 ## Behaviour worth knowing
 
@@ -121,7 +133,7 @@ omarchy-shell autobrightness probe      # re-run hardware detection
 The decision logic is pure and lives in `AutoBrightnessModel.js`:
 
 ```bash
-node tests/run.js   # 85 assertions
+node tests/run.js   # 94 assertions
 ```
 
 ## Upgrading
