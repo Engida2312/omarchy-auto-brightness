@@ -243,6 +243,35 @@ function announcement(settings, capabilities, effective) {
   return null
 }
 
+// tzdata's zone.tab stores each zone's city coordinates in ISO 6709
+// ("+0902+03842" = 9 deg 02' N, 38 deg 42' E), optionally with seconds. Parsing
+// it gives a city-level fix with no geolocation service, no network call, and
+// no permission prompt -- far finer than a sun-elevation curve can use, and it
+// means the solar source works on a fresh install without the user entering
+// anything. Explicit latitude/longitude in the config always wins.
+function parseIso6709(text) {
+  var raw = String(text === null || text === undefined ? "" : text).trim()
+  var m = raw.match(/^([+-])(\d{2})(\d{2})(\d{2})?([+-])(\d{3})(\d{2})(\d{2})?$/)
+  if (!m) return null
+
+  var lat = Number(m[2]) + Number(m[3]) / 60 + Number(m[4] || 0) / 3600
+  if (m[1] === "-") lat = -lat
+  var lon = Number(m[6]) + Number(m[7]) / 60 + Number(m[8] || 0) / 3600
+  if (m[5] === "-") lon = -lon
+
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null
+  return { latitude: lat, longitude: lon }
+}
+
+// Config coordinates if set, otherwise whatever the timezone lookup found.
+function effectiveCoordinates(settings, derived) {
+  if (settings && isNumeric(settings.latitude) && isNumeric(settings.longitude)) {
+    return { latitude: Number(settings.latitude), longitude: Number(settings.longitude) }
+  }
+  if (derived && isNumeric(derived.latitude) && isNumeric(derived.longitude)) return derived
+  return null
+}
+
 // ------------------------------------------------------------ shaping
 
 // On battery, pull the target down by `batteryDim` points. Returns the target
@@ -410,6 +439,8 @@ if (typeof module !== "undefined") {
     sourceReason: sourceReason,
     parseCapabilities: parseCapabilities,
     announcement: announcement,
+    parseIso6709: parseIso6709,
+    effectiveCoordinates: effectiveCoordinates,
     SOURCES: SOURCES
   }
 }

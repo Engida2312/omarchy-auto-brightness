@@ -55,6 +55,14 @@ Item {
   // found would be worse than staying quiet for one probe.
   property bool announceOnResolve: false
 
+  // City coordinates looked up from the system timezone, used only when the
+  // config does not set latitude/longitude. Without this the solar source
+  // needs the user to find and enter their own coordinates before the plugin
+  // does anything — a poor first run for the fallback most machines land on.
+  property var derivedCoordinates: null
+  property bool coordinatesProbed: false
+  property bool sampleAfterCoordinates: false
+
   readonly property bool onBattery: {
     try { return UPower.onBattery === true } catch (e) { return false }
   }
@@ -235,10 +243,23 @@ Item {
       webcamProcess.running = true
       return
     }
-    // Solar needs no subprocess — it is arithmetic on the clock.
-    var elevation = Model.solarElevation(new Date(), root.settings.latitude, root.settings.longitude)
+    // Solar needs no subprocess — it is arithmetic on the clock, once we
+    // know where the clock is.
+    var coords = Model.effectiveCoordinates(root.settings, root.derivedCoordinates)
+    if (!coords && !root.coordinatesProbed) {
+      root.sampleAfterCoordinates = true
+      probeCoordinates()
+      return
+    }
+    if (!coords) {
+      console.warn("autobrightness: could not determine your location from the system"
+        + " timezone; set latitude and longitude in " + root.configPath)
+      finishSample(null)
+      return
+    }
+
+    var elevation = Model.solarElevation(new Date(), coords.latitude, coords.longitude)
     if (elevation === null) {
-      console.warn("autobrightness: solar source needs latitude and longitude in " + root.configPath)
       finishSample(null)
       return
     }
@@ -249,6 +270,11 @@ Item {
   function alsRoot() {
     var raw = String(root.settings.alsPath || "/sys/bus/iio/devices")
     return "'" + raw.replace(/'/g, "'\\''") + "'"
+  }
+
+  function probeCoordinates() {
+    if (coordinateProbe.running || root.coordinatesProbed) return
+    coordinateProbe.running = true
   }
 
   function probeCapabilities() {
@@ -382,6 +408,37 @@ Item {
     id: announceProcess
   }
 
+  // Timezone -> city coordinates, via tzdata's zone.tab. No network, no
+  // geolocation permission, and the answer is already on every Linux box.
+  Process {
+    id: coordinateProbe
+    command: ["bash", "-c",
+      'tz="$(timedatectl show -p Timezone --value 2>/dev/null)"; ' +
+      '[ -n "$tz" ] || tz="$(cat /etc/timezone 2>/dev/null)"; ' +
+      '[ -n "$tz" ] || exit 1; ' +
+      'awk -v tz="$tz" -F "\\t" ' +
+      '\'$0 !~ /^#/ && $3 == tz { print $2; found = 1; exit } END { exit !found }\' ' +
+      '/usr/share/zoneinfo/zone.tab']
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var coords = Model.parseIso6709(text)
+        if (coords) root.derivedCoordinates = coords
+      }
+    }
+    onExited: function(exitCode) {
+      // Marked probed either way: a timezone missing from zone.tab will not
+      // start matching on a retry, and retrying forever would stall every
+      // solar sample.
+      root.coordinatesProbed = true
+      root.changed()
+      if (root.sampleAfterCoordinates) {
+        root.sampleAfterCoordinates = false
+        root.sampleSource()
+      }
+    }
+  }
+
   // Hardware probe. Re-run periodically as well as at startup: a USB ambient
   // light sensor or camera can appear after the shell is up, and the answer
   // decides which source `auto` picks.
@@ -461,7 +518,10 @@ Item {
     }
   }
 
-  Component.onCompleted: root.probeCapabilities()
+  Component.onCompleted: {
+    root.probeCapabilities()
+    root.probeCoordinates()
+  }
 
   // Slow re-probe: hardware changes are rare, so this is about eventually
   // noticing a plugged-in sensor, not about reacting quickly.

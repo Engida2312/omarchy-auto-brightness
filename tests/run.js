@@ -193,6 +193,34 @@ check("explicit source is not reported as a fallback", annForced.body.indexOf("N
 eq("every announcement shares a headline", annSensor.headline, annSolar.headline)
 eq("no announcement before detection resolves", M.announcement(D, null, null), null)
 
+// ---- timezone coordinates (so solar works on a fresh install) ----
+var addis = M.parseIso6709("+0902+03842")
+near("iso6709 latitude", addis.latitude, 9.0333, 0.001)
+near("iso6709 longitude", addis.longitude, 38.7, 0.001)
+
+var withSeconds = M.parseIso6709("+484852+0021820")   // Paris, seconds form
+near("iso6709 with seconds lat", withSeconds.latitude, 48.8144, 0.001)
+near("iso6709 with seconds lon", withSeconds.longitude, 2.3056, 0.001)
+
+var southWest = M.parseIso6709("-3352+01825")          // Cape Town
+check("southern latitude is negative", southWest.latitude < 0, String(southWest.latitude))
+check("eastern longitude is positive", southWest.longitude > 0, String(southWest.longitude))
+
+var west = M.parseIso6709("+4043-07358")               // New York
+check("western longitude is negative", west.longitude < 0, String(west.longitude))
+
+eq("iso6709 rejects junk", M.parseIso6709("not-a-coordinate"), null)
+eq("iso6709 rejects empty", M.parseIso6709(""), null)
+eq("iso6709 rejects short form", M.parseIso6709("+09+038"), null)
+
+// Config always beats the timezone guess.
+var derived = { latitude: 1, longitude: 2 }
+var chosen = M.effectiveCoordinates(M.withDefaults({ latitude: 51.5, longitude: -0.12 }), derived)
+near("explicit coordinates win", chosen.latitude, 51.5, 0.001)
+var fallback = M.effectiveCoordinates(D, derived)
+near("derived coordinates used when unset", fallback.latitude, 1, 0.001)
+eq("no coordinates at all is null", M.effectiveCoordinates(D, null), null)
+
 console.log("passed: " + passed + "   failed: " + failures.length)
 if (failures.length) {
   failures.forEach(function(f) { console.log("  FAIL " + f) })

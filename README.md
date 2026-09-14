@@ -1,31 +1,35 @@
 # Auto Brightness
 
-An Omarchy shell plugin that adds an **AUTO** switch to the brightness row of
-the Display panel. Turn it on and the plugin drives the backlight for you;
-turn it off and brightness is yours again.
+An Omarchy shell plugin that drives your display brightness for you. Flip it on
+and it follows the light — from a real ambient light sensor if your machine has
+one, and from a locally-computed sun position if it doesn't.
 
 ```
-BRIGHTNESS                    AUTO  [ o]   85%
-──────────●────────────────────────────────────
+Bar:  …  󰕾   󰃠   󰍹   ⏻
+             ▲
+        click to toggle
 ```
 
-## How it works
+It gets out of the way the moment you touch the brightness slider yourself.
 
-Two plugins, deliberately split:
+## Install
 
-| Plugin | Kind | Job |
-|---|---|---|
-| `engida.autobrightness` | `service` | All the logic: sample a light source, pick a target, ramp to it |
-| `engida.monitor` | `bar-widget` | A clone of the built-in Display panel with the switch added |
+```bash
+omarchy plugin add https://github.com/Engida2312/omarchy-auto-brightness.git --enable --yes
+```
 
-The panel holds no policy — it calls `toggle()` on the service and renders
-what the service reports. That keeps the forked panel a thin diff against
-upstream, which matters because it has to be re-applied by hand after an
-Omarchy release changes the built-in panel (see *Upgrading* below).
+That adds an **Auto Brightness** toggle to your bar. Click it to turn the
+feature on; click it again to turn it off. Nothing else to configure.
+
+To remove it:
+
+```bash
+omarchy plugin remove engida.autobrightness
+```
 
 ## Light sources
 
-`source` defaults to **`auto`**: the plugin probes the machine at startup and
+`source` defaults to **`auto`**: the plugin probes your machine at startup and
 picks the best source available, preferring a real sensor. You do not configure
 anything for this to work.
 
@@ -39,32 +43,28 @@ The cascade, best evidence first:
 2. **`webcam`** — mean frame luminance, sampled with ffmpeg. Real ambient
    sensing without a sensor, but it wakes the camera and on most laptops lights
    its indicator LED. **Not in the cascade unless you set
-   `allowWebcamFallback: true`** — a switch labelled AUTO should not start using
+   `allowWebcamFallback: true`** — a toggle labelled AUTO should not start using
    your camera on its own.
-3. **`solar`** — sun elevation for your latitude/longitude, computed locally
-   with the NOAA equations. No sensor, no network, no camera. The final
-   fallback, and what most laptops (including this one) land on.
+3. **`solar`** — sun elevation for your location, computed locally with the
+   NOAA equations. No sensor, no network, no camera. The final fallback, and
+   what most laptops land on.
+
+Your coordinates come from your system timezone via tzdata's `zone.tab` — a
+city-level fix with no geolocation service and no permission prompt, far finer
+than a brightness curve can use. Set `latitude`/`longitude` yourself to override.
 
 Setting `source` to `als`, `webcam` or `solar` explicitly overrides detection
 and is honoured even if the hardware is missing — the sampler then reports its
 own failure rather than silently substituting something else.
 
-Detection re-runs at startup, whenever the config file changes, and every ten
-minutes, so a sensor that appears later is picked up without a restart. Force it
-with `omarchy-shell autobrightness probe`.
-
-To see what it chose:
-
-```console
-$ omarchy-shell autobrightness status | jq -c '{effectiveSource, sourceReason}'
-{"effectiveSource":"solar","sourceReason":"no light sensor; estimating from the sun"}
-```
+Detection re-runs at startup, whenever the config changes, and every ten
+minutes, so a sensor that appears later is picked up without a restart.
 
 ### It tells you which one it picked
 
-Switching AUTO on sends a notification naming the source it detected, so you
-find out whether this machine has a light sensor at the moment you first turn
-the feature on — not by reading docs or running a command:
+Switching it on sends a notification naming the source it detected, so you find
+out whether your machine has a light sensor at the moment you turn the feature
+on — not by reading docs:
 
 > **Auto brightness on**
 > Using your ambient light sensor.
@@ -72,18 +72,18 @@ the feature on — not by reading docs or running a command:
 > **Auto brightness on**
 > No ambient light sensor on this machine - following the sun instead.
 
-The switch's tooltip says the same thing on hover, and `status` reports it for
+The bar toggle's tooltip says the same on hover, and `status` reports it for
 scripts.
 
 ## Behaviour worth knowing
 
-**Moving the slider wins.** If the backlight moves away from what the service
-last set, that is you, and the service stands down for `manualOverrideMinutes`
-(default 30). The switch label changes to `PAUSED`. Clicking a paused switch
-resumes immediately rather than turning the feature off.
+**Moving the slider wins.** If the backlight moves away from what the plugin
+last set, that is you, and it stands down for `manualOverrideMinutes`
+(default 30). The bar icon shows a half sun while paused. Clicking a paused
+toggle resumes immediately rather than turning the feature off.
 
 **It ramps, it doesn't jump.** Changes step `rampStep` points every
-`rampIntervalMs` so a correction reads as a transition instead of a flash.
+`rampIntervalMs`, so a correction reads as a transition instead of a flash.
 
 **It ignores small gaps.** Nothing is written unless the target is more than
 `threshold` points away, so the backlight isn't rewritten every minute for a
@@ -91,14 +91,15 @@ change nobody can see.
 
 ## Settings
 
-`~/.config/omarchy/autobrightness.json` — hot-reloads on save.
+`~/.config/omarchy/autobrightness.json` — created on first use, hot-reloads on
+save. Every key is optional.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `false` | The switch. Persisted here when you flip it. |
+| `enabled` | `false` | The toggle. Persisted here when you flip it. |
 | `source` | `"auto"` | `auto` (detect), or force `als` / `webcam` / `solar` |
 | `allowWebcamFallback` | `false` | Let `auto` use the webcam when no sensor exists |
-| `latitude` / `longitude` | from timezone | Needed by `solar` |
+| `latitude` / `longitude` | from timezone | Override the location used by `solar` |
 | `nightBrightness` | `12` | Target in the dark |
 | `dayBrightness` | `85` | Target in full daylight |
 | `minBrightness` / `maxBrightness` | `5` / `100` | Hard bounds, applied last |
@@ -119,7 +120,7 @@ change nobody can see.
 ## CLI
 
 ```bash
-omarchy-shell autobrightness status     # JSON: enabled, paused, target, source
+omarchy-shell autobrightness status     # JSON: enabled, paused, source, target
 omarchy-shell autobrightness enable
 omarchy-shell autobrightness disable
 omarchy-shell autobrightness toggle     # handy for a Hyprland keybinding
@@ -128,31 +129,40 @@ omarchy-shell autobrightness refresh    # sample now instead of waiting
 omarchy-shell autobrightness probe      # re-run hardware detection
 ```
 
+## Optional: put the switch in the Display panel
+
+If you would rather have the switch sit next to the brightness slider in the
+Display panel than in the bar, `integration/monitor-panel.patch` adds it there.
+
+It works by forking Omarchy's built-in Display panel, which is why it is not
+part of the plugin itself: the fork is personal to your machine and does not
+receive Omarchy updates.
+
+```bash
+omarchy plugin clone omarchy.monitor            # creates <username>.monitor
+cd ~/.config/omarchy/plugins/<username>.monitor
+patch -p0 < ~/.config/omarchy/plugins/engida.autobrightness/integration/monitor-panel.patch
+```
+
+Re-apply it after an Omarchy release that changes the built-in panel. To go
+back to the stock panel: `omarchy plugin remove <username>.monitor`.
+
+## Dependencies
+
+Everything below ships with Omarchy; nothing extra to install.
+
+- `brightnessctl` / `omarchy-brightness-display` — applying brightness
+- `ffmpeg` — only when `source` is `webcam`
+- `tzdata` — the timezone → coordinates lookup used by `solar`
+
 ## Tests
 
 The decision logic is pure and lives in `AutoBrightnessModel.js`:
 
 ```bash
-node tests/run.js   # 94 assertions
+node tests/run.js   # 107 assertions
 ```
 
-## Upgrading
+## License
 
-`engida.monitor` is a fork of the built-in Display panel, so an Omarchy update
-that changes `omarchy.monitor` will not reach it. To re-fork:
-
-```bash
-omarchy plugin remove engida.monitor      # back to the built-in
-omarchy plugin clone omarchy.monitor      # fresh copy of the new upstream
-patch -p0 < integration/monitor-panel.patch   # may need fuzz; it is ~50 lines
-```
-
-The patch touches exactly two places: a block of properties near the top of
-`Panel.qml`, and the brightness section header where the switch is added.
-
-## Uninstalling
-
-```bash
-omarchy plugin disable engida.autobrightness
-omarchy plugin remove engida.monitor      # restores the stock Display panel
-```
+MIT — see [LICENSE](LICENSE).

@@ -6,9 +6,18 @@
   "author": "engida",
   "description": "Adjusts display brightness automatically from a light source: solar curve, ambient light sensor, or webcam.",
   "kinds": [
-    "service"
+    "service",
+    "bar-widget"
   ],
   "entryPoints": {
-    "service": "Service.qml"
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Auto Brightness",
+    "description": "Toggle automatic brightness from the bar",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
   }
 }
