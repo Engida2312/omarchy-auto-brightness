@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "engida.autobrightness",
+  "name": "Auto Brightness",
+  "version": "1.0.0",
+  "author": "engida",
+  "description": "Adjusts display brightness automatically from a light source: solar curve, ambient light sensor, or webcam.",
+  "kinds": [
+    "service"
+  ],
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}

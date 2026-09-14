@@ -1,0 +1,146 @@
+--- Panel.qml
++++ Panel.qml
+@@ -18,6 +18,53 @@
+   property int pendingBrightnessPercent: 0
+   property bool brightnessSetQueued: false
+   property bool brightnessAvailable: false
++
++  // ---- Auto brightness ------------------------------------------------
++  //
++  // The AUTO switch below is only a handle: every decision (which light
++  // source, what curve, when to stand down) belongs to the
++  // engida.autobrightness service, so the panel stays a view of it.
++  //
++  // Resolved imperatively, not as a binding on `root.bar.shell`. The bar is
++  // assigned to this widget *after* construction (Bar.qml does
++  // `target.bar = root`), and `bar` is typed QtObject, so a declarative chain
++  // through it evaluates once against null and never recovers. Re-resolve on
++  // the two events that can change the answer: the bar arriving, and the panel
++  // opening (by which time services have loaded).
++  property var autoBrightnessService: null
++
++  function resolveAutoBrightnessService() {
++    var barRef = root.bar
++    var shellRef = barRef ? barRef.shell : null
++    root.autoBrightnessService = (shellRef && typeof shellRef.serviceFor === "function")
++      ? shellRef.serviceFor("engida.autobrightness")
++      : null
++  }
++
++  onBarChanged: root.resolveAutoBrightnessService()
++  readonly property bool autoBrightnessEnabled: autoBrightnessService
++    ? autoBrightnessService.autoEnabled === true
++    : false
++  // Enabled but standing down, because the slider was moved by hand.
++  readonly property bool autoBrightnessPaused: autoBrightnessService
++    ? autoBrightnessService.paused === true
++    : false
++
++  function toggleAutoBrightness() {
++    if (!root.autoBrightnessService) return
++    root.autoBrightnessService.toggle()
++  }
++
++  // Tapping the switch while paused is the clearest way to say "resume now",
++  // so a paused switch resumes instead of turning the feature off.
++  function activateAutoBrightness() {
++    if (!root.autoBrightnessService) return
++    if (root.autoBrightnessPaused) {
++      root.autoBrightnessService.resume()
++      return
++    }
++    root.toggleAutoBrightness()
++  }
+   property string internalMonitor: ""
+   property string externalMonitor: ""
+   property string focusedMonitor: ""
+@@ -349,7 +396,10 @@
+   implicitWidth: button.implicitWidth
+   implicitHeight: button.implicitHeight
+ 
+-  Component.onCompleted: refresh()
++  Component.onCompleted: {
++    refresh()
++    root.resolveAutoBrightnessService()
++  }
+ 
+   // KeyboardPanel primes focus at open-time, so SUPER-bound IPC summons land
+   // with j/k ready to navigate. Keep a default landing point, but don't paint
+@@ -357,6 +407,8 @@
+   onOpenedChanged: {
+     if (opened) {
+       refresh()
++      // A service enabled since this widget was built shows up here.
++      if (!root.autoBrightnessService) root.resolveAutoBrightnessService()
+       if (brightnessAvailable) {
+         focusSection = "brightness"
+         selectedIndex = -1
+@@ -591,7 +643,9 @@
+ 
+             Item {
+               width: parent.width
+-              implicitHeight: Math.max(brightnessHeader.implicitHeight, brightnessPercent.implicitHeight)
++              implicitHeight: Math.max(brightnessHeader.implicitHeight,
++                                       brightnessPercent.implicitHeight,
++                                       autoBrightnessControl.implicitHeight)
+ 
+               PanelSectionHeader {
+                 id: brightnessHeader
+@@ -614,6 +668,57 @@
+                 anchors.rightMargin: Style.space(6)
+                 anchors.verticalCenter: parent.verticalCenter
+               }
++
++              // AUTO switch, between the section title and the percentage.
++              // Hidden entirely when the service is not installed or enabled,
++              // so the panel degrades to the stock layout rather than showing
++              // a dead control.
++              Row {
++                id: autoBrightnessControl
++                visible: root.autoBrightnessService !== null
++                anchors.right: brightnessPercent.left
++                anchors.rightMargin: Style.space(10)
++                anchors.verticalCenter: parent.verticalCenter
++                spacing: Style.space(5)
++
++                Text {
++                  id: autoBrightnessLabel
++                  textFormat: Text.PlainText
++                  text: root.autoBrightnessPaused ? "PAUSED" : "AUTO"
++                  color: root.autoBrightnessEnabled && !root.autoBrightnessPaused
++                    ? root.bar.foreground
++                    : Qt.darker(root.bar.foreground, 1.4)
++                  font.family: root.bar.fontFamily
++                  font.pixelSize: Style.font.caption
++                  font.bold: true
++                  font.letterSpacing: 1.2
++                  anchors.verticalCenter: parent.verticalCenter
++
++                  Behavior on color { ColorAnimation { duration: 120 } }
++                }
++
++                ToggleSwitch {
++                  id: autoBrightnessSwitch
++                  checked: root.autoBrightnessEnabled
++                  foreground: root.bar.foreground
++                  anchors.verticalCenter: parent.verticalCenter
++                  // Smaller than a standalone switch: this one rides a caption
++                  // row, and scaling the default down lands the track on
++                  // fractional pixels.
++                  trackHeight: Math.max(14, Math.round(Style.spacing.controlHeight * 0.40))
++                  onToggled: root.activateAutoBrightness()
++
++                  PanelToolTip {
++                    visible: autoBrightnessSwitch.containsMouse
++                    text: {
++                      if (!root.autoBrightnessEnabled) return "Adjust brightness automatically"
++                      if (root.autoBrightnessPaused) return "Paused after a manual change - click to resume"
++                      return "Following ambient light - click to turn off"
++                    }
++                    fontFamily: root.bar.fontFamily
++                  }
++                }
++              }
+             }
+ 
+             CursorSurface {
