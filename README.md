@@ -25,19 +25,43 @@ Omarchy release changes the built-in panel (see *Upgrading* below).
 
 ## Light sources
 
-Set `source` in `~/.config/omarchy/autobrightness.json`.
+`source` defaults to **`auto`**: the plugin probes the machine at startup and
+picks the best source available, preferring a real sensor. You do not configure
+anything for this to work.
 
-- **`solar`** (default) — sun elevation for your latitude/longitude, computed
-  locally with the NOAA equations. No sensor, no network, no camera. This is
-  the default because most laptops, including this one, have no ambient light
-  sensor at all.
-- **`als`** — a real ambient light sensor, read from
-  `/sys/bus/iio/devices/iio:device*/in_illuminance_raw`. Mapped on a log scale,
-  since perceived brightness tracks the log of luminance. Used only if you have
-  the hardware; the service says so in the log if you don't.
-- **`webcam`** — mean frame luminance sampled with ffmpeg. Genuine ambient
-  sensing without a sensor, but it wakes the camera (and its indicator LED) on
-  every sample. Opt in deliberately.
+The cascade, best evidence first:
+
+1. **`als`** — a real ambient light sensor
+   (`/sys/bus/iio/devices/iio:device*/in_illuminance_raw`). Measures the light
+   actually falling on the machine, so it is always preferred when present.
+   Mapped on a log scale, since perceived brightness tracks the log of
+   luminance.
+2. **`webcam`** — mean frame luminance, sampled with ffmpeg. Real ambient
+   sensing without a sensor, but it wakes the camera and on most laptops lights
+   its indicator LED. **Not in the cascade unless you set
+   `allowWebcamFallback: true`** — a switch labelled AUTO should not start using
+   your camera on its own.
+3. **`solar`** — sun elevation for your latitude/longitude, computed locally
+   with the NOAA equations. No sensor, no network, no camera. The final
+   fallback, and what most laptops (including this one) land on.
+
+Setting `source` to `als`, `webcam` or `solar` explicitly overrides detection
+and is honoured even if the hardware is missing — the sampler then reports its
+own failure rather than silently substituting something else.
+
+Detection re-runs at startup, whenever the config file changes, and every ten
+minutes, so a sensor that appears later is picked up without a restart. Force it
+with `omarchy-shell autobrightness probe`.
+
+To see what it chose:
+
+```console
+$ omarchy-shell autobrightness status | jq -c '{effectiveSource, sourceReason}'
+{"effectiveSource":"solar","sourceReason":"no light sensor; estimating from the sun"}
+```
+
+The switch's tooltip says the same thing, so the automatic choice is visible
+without leaving the panel.
 
 ## Behaviour worth knowing
 
@@ -60,7 +84,8 @@ change nobody can see.
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `false` | The switch. Persisted here when you flip it. |
-| `source` | `"solar"` | `solar`, `als`, or `webcam` |
+| `source` | `"auto"` | `auto` (detect), or force `als` / `webcam` / `solar` |
+| `allowWebcamFallback` | `false` | Let `auto` use the webcam when no sensor exists |
 | `latitude` / `longitude` | from timezone | Needed by `solar` |
 | `nightBrightness` | `12` | Target in the dark |
 | `dayBrightness` | `85` | Target in full daylight |
@@ -70,6 +95,7 @@ change nobody can see.
 | `maxLux` | `1000` | Lux that maps to `dayBrightness` (`als`) |
 | `webcamGain` | `1.8` | Stretches the camera's usable range |
 | `webcamDevice` | `"/dev/video0"` | Camera to sample |
+| `alsPath` | `"/sys/bus/iio/devices"` | Where to look for IIO sensors |
 | `batteryDim` | `0` | Points to subtract on battery. `0` disables. |
 | `threshold` | `3` | Deadband before writing |
 | `rampStep` / `rampIntervalMs` | `2` / `180` | Ramp speed |
@@ -87,6 +113,7 @@ omarchy-shell autobrightness disable
 omarchy-shell autobrightness toggle     # handy for a Hyprland keybinding
 omarchy-shell autobrightness resume     # clear a manual-override pause
 omarchy-shell autobrightness refresh    # sample now instead of waiting
+omarchy-shell autobrightness probe      # re-run hardware detection
 ```
 
 ## Tests
@@ -94,7 +121,7 @@ omarchy-shell autobrightness refresh    # sample now instead of waiting
 The decision logic is pure and lives in `AutoBrightnessModel.js`:
 
 ```bash
-node tests/run.js
+node tests/run.js   # 85 assertions
 ```
 
 ## Upgrading

@@ -107,8 +107,8 @@ eq("override window computed", M.overrideExpiresAt(1000, M.withDefaults({ manual
 eq("override disabled returns 0", M.overrideExpiresAt(1000, M.withDefaults({ manualOverrideMinutes: 0 })), 0)
 
 // ---- defaults ----
-eq("default source", D.source, "solar")
-eq("bad source ignored", M.withDefaults({ source: "telepathy" }).source, "solar")
+eq("default source is auto", D.source, "auto")
+eq("bad source ignored", M.withDefaults({ source: "telepathy" }).source, "auto")
 eq("valid source honoured", M.withDefaults({ source: "webcam" }).source, "webcam")
 eq("junk number ignored", M.withDefaults({ dayBrightness: "bright" }).dayBrightness, 85)
 eq("null ignored", M.withDefaults({ dayBrightness: null }).dayBrightness, 85)
@@ -120,6 +120,56 @@ eq("default webcam device", D.webcamDevice, "/dev/video0")
 eq("monitor name survives merge", M.withDefaults({ monitor: "DP-1" }).monitor, "DP-1")
 eq("webcam device survives merge", M.withDefaults({ webcamDevice: "/dev/video2" }).webcamDevice, "/dev/video2")
 eq("empty monitor ignored", M.withDefaults({ monitor: "" }).monitor, "")
+
+// ---- automatic source detection ----
+var CAPS_SENSOR = { als: true,  webcam: true }
+var CAPS_CAM    = { als: false, webcam: true }
+var CAPS_NONE   = { als: false, webcam: false }
+
+// A real sensor always wins when one exists.
+eq("auto prefers the ambient light sensor", M.detectSource(D, CAPS_SENSOR), "als")
+eq("auto prefers sensor even over allowed webcam",
+   M.detectSource(M.withDefaults({ allowWebcamFallback: true }), CAPS_SENSOR), "als")
+
+// No sensor: solar, unless the webcam was explicitly allowed.
+eq("auto falls back to solar without a sensor", M.detectSource(D, CAPS_CAM), "solar")
+eq("auto uses webcam only when allowed",
+   M.detectSource(M.withDefaults({ allowWebcamFallback: true }), CAPS_CAM), "webcam")
+eq("allowed webcam still needs a camera",
+   M.detectSource(M.withDefaults({ allowWebcamFallback: true }), CAPS_NONE), "solar")
+eq("auto falls back to solar with nothing", M.detectSource(D, CAPS_NONE), "solar")
+
+// An explicit choice is honoured even when the hardware is absent.
+eq("explicit als honoured", M.detectSource(M.withDefaults({ source: "als" }), CAPS_NONE), "als")
+eq("explicit webcam honoured", M.detectSource(M.withDefaults({ source: "webcam" }), CAPS_NONE), "webcam")
+eq("explicit solar honoured", M.detectSource(M.withDefaults({ source: "solar" }), CAPS_SENSOR), "solar")
+
+// Before the probe answers, auto must say "unknown" rather than guess.
+eq("auto waits for the probe", M.detectSource(D, null), null)
+eq("explicit source does not wait", M.detectSource(M.withDefaults({ source: "als" }), null), "als")
+
+// ---- capability probe parsing ----
+eq("probe both present", JSON.stringify(M.parseCapabilities("als=1 cam=1")), JSON.stringify({ als: true, webcam: true }))
+eq("probe sensor only", JSON.stringify(M.parseCapabilities("als=1 cam=0")), JSON.stringify({ als: true, webcam: false }))
+eq("probe neither", JSON.stringify(M.parseCapabilities("als=0 cam=0")), JSON.stringify({ als: false, webcam: false }))
+eq("probe tolerates whitespace", JSON.stringify(M.parseCapabilities("  als=0 cam=1\n")), JSON.stringify({ als: false, webcam: true }))
+eq("probe empty is unknown", M.parseCapabilities(""), null)
+eq("probe garbage is unknown", M.parseCapabilities("command not found"), null)
+eq("probe partial is unknown", M.parseCapabilities("als=1"), null)
+
+// ---- boolean settings survive the merge ----
+eq("webcam fallback defaults off", D.allowWebcamFallback, false)
+eq("webcam fallback accepts true", M.withDefaults({ allowWebcamFallback: true }).allowWebcamFallback, true)
+eq("webcam fallback accepts string true", M.withDefaults({ allowWebcamFallback: "true" }).allowWebcamFallback, true)
+eq("webcam fallback rejects junk", M.withDefaults({ allowWebcamFallback: "maybe" }).allowWebcamFallback, false)
+
+// ---- reason strings name the cause ----
+check("reason cites the sensor", M.sourceReason(D, CAPS_SENSOR, "als").indexOf("sensor") !== -1,
+  M.sourceReason(D, CAPS_SENSOR, "als"))
+check("reason explains the solar fallback", M.sourceReason(D, CAPS_NONE, "solar").indexOf("no light sensor") !== -1,
+  M.sourceReason(D, CAPS_NONE, "solar"))
+check("reason reports an explicit choice", M.sourceReason(M.withDefaults({ source: "solar" }), CAPS_SENSOR, "solar").indexOf("set to") !== -1,
+  M.sourceReason(M.withDefaults({ source: "solar" }), CAPS_SENSOR, "solar"))
 
 console.log("passed: " + passed + "   failed: " + failures.length)
 if (failures.length) {

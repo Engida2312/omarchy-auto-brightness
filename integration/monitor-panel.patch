@@ -1,6 +1,6 @@
 --- Panel.qml
 +++ Panel.qml
-@@ -18,6 +18,53 @@
+@@ -18,6 +18,61 @@
    property int pendingBrightnessPercent: 0
    property bool brightnessSetQueued: false
    property bool brightnessAvailable: false
@@ -35,6 +35,14 @@
 +  readonly property bool autoBrightnessPaused: autoBrightnessService
 +    ? autoBrightnessService.paused === true
 +    : false
++  // Which light source the service settled on, and why. Surfaced in the
++  // tooltip so the automatic choice is visible without running a CLI command.
++  readonly property string autoBrightnessSource: autoBrightnessService && autoBrightnessService.effectiveSource
++    ? String(autoBrightnessService.effectiveSource)
++    : ""
++  readonly property string autoBrightnessReason: autoBrightnessService
++    ? String(autoBrightnessService.sourceReason || "")
++    : ""
 +
 +  function toggleAutoBrightness() {
 +    if (!root.autoBrightnessService) return
@@ -54,7 +62,7 @@
    property string internalMonitor: ""
    property string externalMonitor: ""
    property string focusedMonitor: ""
-@@ -349,7 +396,10 @@
+@@ -349,7 +404,10 @@
    implicitWidth: button.implicitWidth
    implicitHeight: button.implicitHeight
  
@@ -66,7 +74,7 @@
  
    // KeyboardPanel primes focus at open-time, so SUPER-bound IPC summons land
    // with j/k ready to navigate. Keep a default landing point, but don't paint
-@@ -357,6 +407,8 @@
+@@ -357,6 +415,8 @@
    onOpenedChanged: {
      if (opened) {
        refresh()
@@ -75,7 +83,7 @@
        if (brightnessAvailable) {
          focusSection = "brightness"
          selectedIndex = -1
-@@ -591,7 +643,9 @@
+@@ -591,7 +651,9 @@
  
              Item {
                width: parent.width
@@ -86,7 +94,7 @@
  
                PanelSectionHeader {
                  id: brightnessHeader
-@@ -614,6 +668,57 @@
+@@ -614,6 +676,62 @@
                  anchors.rightMargin: Style.space(6)
                  anchors.verticalCenter: parent.verticalCenter
                }
@@ -133,9 +141,14 @@
 +                  PanelToolTip {
 +                    visible: autoBrightnessSwitch.containsMouse
 +                    text: {
-+                      if (!root.autoBrightnessEnabled) return "Adjust brightness automatically"
++                      if (!root.autoBrightnessEnabled) {
++                        return root.autoBrightnessReason !== ""
++                          ? "Adjust brightness automatically - " + root.autoBrightnessReason
++                          : "Adjust brightness automatically"
++                      }
 +                      if (root.autoBrightnessPaused) return "Paused after a manual change - click to resume"
-+                      return "Following ambient light - click to turn off"
++                      if (root.autoBrightnessSource === "") return "Detecting light source..."
++                      return "Following " + root.autoBrightnessSource + " - click to turn off"
 +                    }
 +                    fontFamily: root.bar.fontFamily
 +                  }

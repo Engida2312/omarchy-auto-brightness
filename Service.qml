@@ -42,6 +42,14 @@ Item {
   // A reading is { kind: "solar"|"lux"|"webcam", value: Number }.
   property var lastReading: null
 
+  // What the machine actually has: { als: bool, webcam: bool }, or null until
+  // the probe has answered. Null is meaningfully different from "nothing
+  // found" -- with `source: "auto"` we wait for the answer rather than
+  // sampling the wrong thing on the first tick.
+  property var capabilities: null
+  property bool sampleAfterProbe: false
+  property bool probeQueued: false
+
   readonly property bool onBattery: {
     try { return UPower.onBattery === true } catch (e) { return false }
   }
@@ -50,13 +58,19 @@ Item {
   readonly property bool paused: overrideUntilMs > 0 && Date.now() < overrideUntilMs
   readonly property bool active: autoEnabled && !paused
 
-  readonly property string source: String(settings.source || "solar")
+  // What the user asked for ("auto" by default) ...
+  readonly property string source: String(settings.source || "auto")
+  // ... and what that resolves to against this machine's hardware. Null while
+  // the probe is still running.
+  readonly property var effectiveSource: Model.detectSource(root.settings, root.capabilities)
+  readonly property string sourceReason: Model.sourceReason(root.settings, root.capabilities, root.effectiveSource)
 
   readonly property string statusText: {
     if (!autoEnabled) return "Off"
     if (paused) return "Paused (manual)"
+    if (!effectiveSource) return "Detecting light source"
     if (target === null) return "Waiting for a reading"
-    return "Following " + source + " -> " + target + "%"
+    return "Following " + effectiveSource + " -> " + target + "%"
   }
 
   signal changed()
@@ -80,6 +94,10 @@ Item {
 
     sampleTimer.interval = Math.max(5, Number(root.settings.intervalSeconds)) * 1000
     rampTimer.interval = Math.max(50, Number(root.settings.rampIntervalMs))
+
+    // Settings can move the goalposts for detection (alsPath especially), so
+    // the cached probe result is no longer trustworthy. Re-ask.
+    probeCapabilities()
 
     if (root.autoEnabled) tick()
     else rampTimer.stop()
@@ -164,11 +182,19 @@ Item {
   }
 
   function sampleSource() {
-    if (root.source === "als") {
+    // `auto` with no probe result yet: find out what this machine has, then
+    // come back here. The probe is a single cheap bash call.
+    if (!root.effectiveSource) {
+      root.sampleAfterProbe = true
+      probeCapabilities()
+      return
+    }
+
+    if (root.effectiveSource === "als") {
       alsProcess.running = true
       return
     }
-    if (root.source === "webcam") {
+    if (root.effectiveSource === "webcam") {
       webcamProcess.command = webcamCommand()
       webcamProcess.running = true
       return
@@ -181,6 +207,33 @@ Item {
       return
     }
     finishSample({ kind: "solar", value: elevation })
+  }
+
+  // Shell-quote for embedding in the bash -c probes below.
+  function alsRoot() {
+    var raw = String(root.settings.alsPath || "/sys/bus/iio/devices")
+    return "'" + raw.replace(/'/g, "'\\''") + "'"
+  }
+
+  function probeCapabilities() {
+    // A probe already running was launched with the *previous* settings, so a
+    // request arriving now is not redundant -- the startup probe races the
+    // config load, and dropping the second one pins `alsPath` to its default.
+    if (capabilityProbe.running) {
+      root.probeQueued = true
+      return
+    }
+    capabilityProbe.command = root.capabilityProbeCommand()
+    capabilityProbe.running = true
+  }
+
+  function capabilityProbeCommand() {
+    return ["bash", "-c",
+      'als=0; for d in ' + root.alsRoot() + '/iio:device*; do ' +
+      '[ -r "$d/in_illuminance_raw" ] && { als=1; break; }; done; ' +
+      'cam=0; command -v ffmpeg >/dev/null 2>&1 && ' +
+      'for v in /dev/video*; do [ -e "$v" ] && { cam=1; break; }; done; ' +
+      'printf "als=%s cam=%s\\n" "$als" "$cam"']
   }
 
   function webcamCommand() {
@@ -289,12 +342,46 @@ Item {
     id: applyProcess
   }
 
+  // Hardware probe. Re-run periodically as well as at startup: a USB ambient
+  // light sensor or camera can appear after the shell is up, and the answer
+  // decides which source `auto` picks.
+  Process {
+    id: capabilityProbe
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var found = Model.parseCapabilities(text)
+        var before = root.effectiveSource
+        if (found) root.capabilities = found
+        root.changed()
+        // Detection changed the answer (a sensor appeared, say): act on it now
+        // instead of running the old source until the next interval.
+        if (root.autoEnabled && root.effectiveSource !== before) root.tick()
+      }
+    }
+    onExited: function(exitCode) {
+      // An unparseable or failed probe leaves `capabilities` as it was. On a
+      // cold start that is still null, so treat it as "nothing found" rather
+      // than retrying forever and never sampling.
+      if (root.capabilities === null) root.capabilities = { als: false, webcam: false }
+      if (root.probeQueued) {
+        root.probeQueued = false
+        root.probeCapabilities()
+        return
+      }
+      if (root.sampleAfterProbe) {
+        root.sampleAfterProbe = false
+        root.sampleSource()
+      }
+    }
+  }
+
   Process {
     id: alsProcess
     // Kernel ALS nodes live at unpredictable indices; take the first that has
     // a raw illuminance and print it with its scale for parseLux.
     command: ["bash", "-c",
-      'for d in /sys/bus/iio/devices/iio:device*; do ' +
+      'for d in ' + root.alsRoot() + '/iio:device*; do ' +
       '[ -r "$d/in_illuminance_raw" ] || continue; ' +
       'printf "%s %s\\n" "$(cat "$d/in_illuminance_raw")" "$(cat "$d/in_illuminance_scale" 2>/dev/null)"; ' +
       'exit 0; done; exit 1']
@@ -329,6 +416,17 @@ Item {
         root.finishSample(null)
       }
     }
+  }
+
+  Component.onCompleted: root.probeCapabilities()
+
+  // Slow re-probe: hardware changes are rare, so this is about eventually
+  // noticing a plugged-in sensor, not about reacting quickly.
+  Timer {
+    interval: 600000
+    running: true
+    repeat: true
+    onTriggered: root.probeCapabilities()
   }
 
   Timer {
@@ -379,6 +477,9 @@ Item {
         paused: root.paused,
         active: root.active,
         source: root.source,
+        effectiveSource: root.effectiveSource,
+        sourceReason: root.sourceReason,
+        capabilities: root.capabilities,
         target: root.target,
         current: root.currentBrightness,
         onBattery: root.onBattery,
@@ -408,6 +509,12 @@ Item {
 
     function refresh(): void {
       root.tick()
+    }
+
+    // Re-run hardware detection now, rather than waiting for the slow timer.
+    function probe(): string {
+      root.probeCapabilities()
+      return "probing"
     }
   }
 }

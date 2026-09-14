@@ -158,6 +158,55 @@ function parseLux(rawText, scaleText) {
   return raw * scale
 }
 
+// ------------------------------------------------------------ source
+
+var SOURCES = ["auto", "als", "webcam", "solar"]
+
+// Which source to actually sample, given what the machine turned out to have.
+//
+// `capabilities` is what the hardware probe found: { als: bool, webcam: bool }.
+// A null capabilities means the probe has not answered yet -- say so rather
+// than guessing, so the caller can wait instead of sampling the wrong thing.
+//
+// Order is by quality of evidence. A real ambient light sensor measures the
+// light actually falling on the machine; the webcam infers it from a picture of
+// whatever the lid happens to face; the solar curve is an estimate from the
+// clock that knows nothing about the room. Prefer the sensor whenever one
+// exists.
+function detectSource(settings, capabilities) {
+  var configured = String((settings && settings.source) || "auto")
+
+  // An explicit choice is honoured even if the hardware is missing: the user
+  // asked for it, and the sampler reports its own failure clearly.
+  if (configured !== "auto") return configured
+  if (!capabilities) return null
+
+  if (capabilities.als === true) return "als"
+  if (capabilities.webcam === true && settings && settings.allowWebcamFallback === true) return "webcam"
+  return "solar"
+}
+
+// Why the effective source was chosen, for the status line and the tooltip.
+function sourceReason(settings, capabilities, effective) {
+  var configured = String((settings && settings.source) || "auto")
+  if (configured !== "auto") return "set to " + configured
+  if (!capabilities) return "detecting hardware"
+  if (effective === "als") return "ambient light sensor detected"
+  if (effective === "webcam") return "no light sensor; using the webcam"
+  if (capabilities.webcam === true) return "no light sensor; estimating from the sun"
+  return "no light sensor or webcam; estimating from the sun"
+}
+
+// Parse the hardware probe's output ("als=1 cam=0").
+function parseCapabilities(text) {
+  var raw = String(text === null || text === undefined ? "" : text).trim()
+  if (raw === "") return null
+  var als = /\bals=1\b/.test(raw)
+  var webcam = /\bcam=1\b/.test(raw)
+  if (!/\bals=[01]\b/.test(raw) || !/\bcam=[01]\b/.test(raw)) return null
+  return { als: als, webcam: webcam }
+}
+
 // ------------------------------------------------------------ shaping
 
 // On battery, pull the target down by `batteryDim` points. Returns the target
@@ -240,7 +289,7 @@ function overrideExpiresAt(nowMs, settings) {
 // unparseable falls back rather than poisoning the curve with NaN.
 function withDefaults(settings) {
   var defaults = {
-    source: "solar",
+    source: "auto",
     latitude: null,
     longitude: null,
     nightBrightness: 12,
@@ -259,7 +308,17 @@ function withDefaults(settings) {
     manualOverrideMinutes: 30,
     overrideThreshold: 4,
     monitor: "",
-    webcamDevice: "/dev/video0"
+    webcamDevice: "/dev/video0",
+    // Where kernel IIO devices live. Overridable so the sensor path can be
+    // pointed at a fixture and exercised on a machine with no sensor -- and so
+    // an unusual kernel layout is a config change, not a code change.
+    alsPath: "/sys/bus/iio/devices",
+    // The webcam is deliberately outside the automatic cascade. It is the only
+    // source that costs the user something to sample -- the camera wakes, and
+    // on most laptops its indicator LED lights -- and a switch labelled AUTO
+    // should not decide that on their behalf. Opt in and it joins the cascade
+    // ahead of the solar estimate.
+    allowWebcamFallback: false
   }
 
   var merged = {}
@@ -272,7 +331,11 @@ function withDefaults(settings) {
     if (value === null || value === undefined || value === "") continue
     if (given === "source") {
       var source = String(value)
-      if (source === "solar" || source === "als" || source === "webcam") merged.source = source
+      if (SOURCES.indexOf(source) !== -1) merged.source = source
+      continue
+    }
+    if (typeof defaults[given] === "boolean") {
+      merged[given] = value === true || value === "true"
       continue
     }
     // `monitor` and `webcamDevice` are names, not quantities — Number() would
@@ -306,6 +369,10 @@ if (typeof module !== "undefined") {
     rampStep: rampStep,
     isManualOverride: isManualOverride,
     overrideExpiresAt: overrideExpiresAt,
-    withDefaults: withDefaults
+    withDefaults: withDefaults,
+    detectSource: detectSource,
+    sourceReason: sourceReason,
+    parseCapabilities: parseCapabilities,
+    SOURCES: SOURCES
   }
 }
