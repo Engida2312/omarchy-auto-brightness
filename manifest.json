@@ -4,7 +4,8 @@
   "name": "Auto Brightness",
   "version": "1.0.0",
   "author": "engida",
-  "description": "Adjusts display brightness automatically from a light source: solar curve, ambient light sensor, or webcam.",
+  "license": "MIT",
+  "description": "Automatic display brightness: follows your ambient light sensor when you have one, and the sun's position when you don't.",
   "kinds": [
     "service",
     "bar-widget"
