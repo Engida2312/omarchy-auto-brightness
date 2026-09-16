@@ -4,11 +4,7 @@ An Omarchy shell plugin that drives your display brightness for you. Flip it on
 and it follows the light — from a real ambient light sensor if your machine has
 one, and from a locally-computed sun position if it doesn't.
 
-```
-Bar:  …  󰕾   󰃠   󰍹   ⏻
-             ▲
-        click to toggle
-```
+![Auto Brightness](preview.png)
 
 It gets out of the way the moment you touch the brightness slider yourself.
 
@@ -20,6 +16,8 @@ omarchy plugin add https://github.com/Engida2312/omarchy-auto-brightness.git --e
 
 That adds an **Auto Brightness** toggle to your bar. Click it to turn the
 feature on; click it again to turn it off. Nothing else to configure.
+
+![The toggle in the bar](screenshots/bar-toggle.png)
 
 To remove it:
 
@@ -71,6 +69,8 @@ on — not by reading docs:
 
 > **Auto brightness on**
 > No ambient light sensor on this machine - following the sun instead.
+
+![Notification naming the detected source](screenshots/notification.png)
 
 The bar toggle's tooltip says the same on hover, and `status` reports it for
 scripts.
@@ -133,6 +133,8 @@ omarchy-shell autobrightness probe      # re-run hardware detection
 
 If you would rather have the switch sit next to the brightness slider in the
 Display panel than in the bar, `integration/monitor-panel.patch` adds it there.
+
+![The AUTO switch in the Display panel](screenshots/display-panel-optional.png)
 
 It works by forking Omarchy's built-in Display panel, which is why it is not
 part of the plugin itself: the fork is personal to your machine and does not
